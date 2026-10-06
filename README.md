@@ -1,4 +1,4 @@
-# RC UFO local browser controls
+# E99 (RC UFO) local browser controls
 
 For the drone that returned profile 83 in your probe. This client uses the
 observed TC nine-byte UDP control protocol and RTSP video over UDP. It does
