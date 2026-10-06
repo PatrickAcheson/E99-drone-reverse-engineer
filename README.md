@@ -44,6 +44,26 @@ Calibration should be used with the drone stationary on a level surface.
 Headless mode sets the observed TC flag 0x10. There are no automatic
 take-off, return, flip, or landing sequences.
 
+## Drift and trim
+
+If the drone drifts backward with no keys held, use **Pitch trim -> Forward +**
+in small steps. Each click adds 2 to the resting pitch value; for example,
+trim +4 sends pitch 132 with no movement input. Roll and yaw have equivalent
+trim controls. **Reset trim** returns all three offsets to zero. Trim starts
+at zero each time the Python controller is launched and remains set during
+that session. No correction is applied automatically from the video.
+
+Calibration and trim serve different purposes. Place the drone stationary
+on a level surface, reset trim, and let the **two-second calibration command**
+finish before taking off. The client shows a countdown and prevents take-off
+from interrupting it. During calibration it transmits untrimmed neutral
+sticks. This confirms the command duration, not successful firmware calibration.
+Emergency stop and landing remain available during the countdown.
+
+After calibration, use trim only for small remaining drift. A large required
+offset should prompt comparison with the original app and inspection of the
+drone's propellers and airframe, rather than continually increasing trim.
+
 Releasing movement keys or leaving the window recentres sticks. The sender
 operates independently of the video decoder at nominally 20 Hz. It disables
 control if status replies disappear for three seconds or the UI stops
@@ -68,6 +88,12 @@ The app uses the installed FFmpeg RTP/JPEG decoder, with UDP transport and
 a bounded queue of the latest decoded frame. Portrait input rotates 90
 degrees by default to match the original app; change the Rotate dropdown
 if needed. It does not upscale recordings to fake 4K/8K resolutions.
+
+The camera fills the main workspace and scales to fit after rotation,
+preserving its aspect ratio. **Focus view** hides the side panel for more
+viewing space; **Show controls** restores it. The motor-stop button remains
+visible in the header. On smaller windows the controls move below the image.
+This enlarges the display without adding detail to the source video.
 
 If Windows asks whether Python/FFmpeg may receive traffic, allow the
 executables on the drone network so the UDP stream can arrive. A black

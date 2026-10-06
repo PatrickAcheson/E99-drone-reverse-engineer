@@ -33,6 +33,12 @@ class Controller:
         self.link, self.video = None, None
         self.last_input_sequence = -1
         self.fps_time, self.fps_count, self.fps = time.monotonic(), 0, 0.0
+        self.trims = {"roll": 0, "pitch": 0, "yaw": 0}
+        self.last_keys, self.last_speed, self.headless = set(), 30, False
+
+    def update_sticks(self):
+        if self.link:
+            self.link.update_input(axes_for_keys(self.last_keys, self.last_speed, self.trims), self.headless)
 
     def connect(self, host):
         with self.lock:
@@ -45,6 +51,7 @@ class Controller:
             self.link = (DemoLink if self.demo else FlightLink)(host, self.log.emit)
             self.video = VideoFeed(host, self.executable, self.log, self.demo)
             self.last_input_sequence = -1
+            self.last_keys = set()
             self.fps_time, self.fps_count, self.fps = time.monotonic(), 0, 0.0
             self.link.start()
             self.video.start()
@@ -67,6 +74,7 @@ class Controller:
             state = {"connected": self.link is not None, "host": self.host, "demo": self.demo,
                      "enabled": False, "profile": None, "fresh": False, "emergency": False,
                      "reason": "Disconnected", "axes": [128] * 4, "video": "Video waiting",
+                     "trims": dict(self.trims), "calibrating": False, "calibration_remaining": 0,
                      "video_stale": False, "dimensions": None, "fps": 0, "log_directory": str(self.log.directory)}
             if self.link:
                 state.update(self.link.status())
@@ -89,21 +97,42 @@ class Controller:
         speed = values.get("speed", 30)
         if not isinstance(speed, (int, float)) or not math.isfinite(speed):
             raise ValueError("Invalid stick speed")
-        axes = axes_for_keys(set(keys), speed)
         with self.lock:
             if sequence <= self.last_input_sequence:
                 return "Old input ignored"
             self.last_input_sequence = sequence
-            if self.link:
-                self.link.update_input(axes, values.get("headless") is True)
+            self.last_keys, self.last_speed = set(keys), speed
+            self.headless = values.get("headless") is True
+            self.update_sticks()
         return "Input updated"
+
+    def adjust_trim(self, values):
+        axis = values.get("axis")
+        delta = values.get("delta")
+        with self.lock:
+            if self.link and self.link.status()["calibrating"]:
+                return "Wait for the calibration command to finish before changing trim"
+            if axis == "reset":
+                self.trims = {"roll": 0, "pitch": 0, "yaw": 0}
+            elif axis in self.trims and isinstance(delta, int) and delta in (-2, 2):
+                self.trims[axis] = max(-48, min(48, self.trims[axis] + delta))
+            else:
+                raise ValueError("Choose roll, pitch, or yaw with a trim step of -2 or +2")
+            self.last_keys.clear()
+            self.update_sticks()
+            self.log.emit("trim", values=dict(self.trims))
+            return "Trim: " + ", ".join(f"{name} {value:+d}" for name, value in self.trims.items())
 
     def action(self, name):
         with self.lock:
             if not self.link:
                 return "Connect first"
             if name == "enable":
-                return self.link.enable()[1]
+                accepted, message = self.link.enable()
+                if accepted:
+                    self.last_keys.clear()
+                    self.update_sticks()
+                return message
             if name == "disable":
                 self.link.disable()
                 return "Controls disabled; this does not land the drone"
@@ -158,6 +187,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             page = (Path(__file__).parent / "rcufo" / "assets" / "controller.html").read_text(encoding="utf-8")
             self.respond(200, page.replace("__TOKEN__", self.server.token).encode(), "text/html; charset=utf-8")
+        elif path in ("/assets/controller.css", "/assets/controller.js"):
+            asset = Path(__file__).parent / "rcufo" / "assets" / path.rsplit("/", 1)[1]
+            content_type = "text/css; charset=utf-8" if path.endswith(".css") else "text/javascript; charset=utf-8"
+            self.respond(200, asset.read_bytes(), content_type)
         elif path == "/api/state":
             self.respond(200, self.server.controller.state())
         elif path == "/stream":
@@ -171,16 +204,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         last = None
+        last_sent = 0.0
         try:
+            self.wfile.write(b"--frame\r\n")
             while True:
                 video = self.server.controller.video
                 if video is None:
                     return
                 image = video.latest_jpeg
-                if image is not None and image is not last:
-                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(image)).encode() + b"\r\n\r\n" + image + b"\r\n")
+                # Repeat a still frame occasionally so new browser clients can
+                # finish parsing a multipart image even when decoding is paused.
+                if image is not None and (image is not last or time.monotonic() - last_sent >= 0.5):
+                    self.wfile.write(b"Content-Type: image/jpeg\r\nContent-Length: " + str(len(image)).encode() + b"\r\n\r\n" + image + b"\r\n--frame\r\n")
                     self.wfile.flush()
                     last = image
+                    last_sent = time.monotonic()
                 time.sleep(0.02)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
@@ -206,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
                 message = controller.input(values)
             elif path == "/api/action":
                 message = controller.action(values.get("name"))
+            elif path == "/api/trim":
+                message = controller.adjust_trim(values)
             elif path == "/api/quit":
                 message = controller.disconnect()
                 threading.Thread(target=self.server.shutdown, daemon=True).start()

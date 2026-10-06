@@ -17,11 +17,18 @@ def control_packet(roll=128, pitch=128, throttle=128, yaw=128, flags=0):
     return bytes((3, 0x66, *values, checksum, 0x99))
 
 
-def axes_for_keys(keys, speed):
+def axes_for_keys(keys, speed, trims=None):
     speed = max(1, min(64, int(speed)))
-    def axis(positive, negative):
-        return 128 + speed * (int(positive in keys) - int(negative in keys))
-    return (axis("d", "a"), axis("w", "s"), axis("space", "shift"), axis("e", "q"))
+    trims = trims or {}
+    for name in ("roll", "pitch", "yaw"):
+        value = trims.get(name, 0)
+        if not isinstance(value, int) or not -48 <= value <= 48:
+            raise ValueError("Trim values must be integers in range -48..48")
+    def axis(positive, negative, trim=0):
+        value = 128 + trim + speed * (int(positive in keys) - int(negative in keys))
+        return max(1, min(255, value))
+    return (axis("d", "a", trims.get("roll", 0)), axis("w", "s", trims.get("pitch", 0)),
+            axis("space", "shift"), axis("e", "q", trims.get("yaw", 0)))
 
 
 class FlightLink:
@@ -72,8 +79,10 @@ class FlightLink:
 
     def status(self):
         with self.lock:
+            remaining = max(0.0, self.command_until - time.monotonic()) if self.command_flag == CALIBRATE else 0.0
             return {"enabled": self.enabled, "profile": self.profile, "fresh": self.fresh(),
-                    "reason": self.reason, "axes": self.axes, "packets_sent": self.sent_packets,
+                    "reason": self.reason, "axes": (128,) * 4 if remaining else self.axes, "packets_sent": self.sent_packets,
+                    "calibrating": remaining > 0, "calibration_remaining": round(remaining, 1),
                     "emergency": self.emergency_until > time.monotonic()}
 
     def enable(self):
@@ -126,12 +135,15 @@ class FlightLink:
             else:
                 if not self.enabled or not self.fresh():
                     return False, "Enable controls with a live connection first"
+                if name in ("takeoff", "calibrate") and self.command_flag == CALIBRATE and now < self.command_until:
+                    self.emit("command_rejected", name=name, reason="calibration_in_progress")
+                    return False, f"Calibration command still running: {self.command_until - now:.1f}s remaining"
                 commands = {"takeoff": (TAKEOFF, 1.0), "land": (LAND, 1.0), "calibrate": (CALIBRATE, 2.0)}
                 flag, duration = commands[name]
                 self.command_flag = flag
                 self.command_until = now + duration
                 self.axes = (128, 128, 128, 128)
-                self.send(control_packet(flags=flag | (HEADLESS if self.headless else 0)), name)
+                self.send(control_packet(flags=flag | (HEADLESS if self.headless and name != "calibrate" else 0)), name)
             self.emit("command", name=name)
             return True, name.replace("_", " ").title() + " sent"
 
@@ -182,6 +194,9 @@ class FlightLink:
             flags = HEADLESS if self.headless else 0
             if now < self.command_until:
                 flags |= self.command_flag
+                if self.command_flag == CALIBRATE:
+                    self.send(control_packet(flags=CALIBRATE), "flight")
+                    return
             self.send(control_packet(*self.axes, flags), "flight")
 
     def run(self):
@@ -203,8 +218,11 @@ class FlightLink:
                 self.accept_response(data, source)
             if now >= next_control:
                 self.tick(now)
-                next_control = now + 0.05  # No burst of old commands after a scheduler delay.
-            self.stopping.wait(0.005)
+                # Retain the 50 ms schedule through small Windows timer delays.
+                next_control += 0.05
+                if next_control <= now:
+                    next_control = now + 0.05  # Skip missed periods rather than bursting.
+            self.stopping.wait(max(0.001, min(0.01, next_control - time.monotonic())))
 
     def stop(self):
         self.disable("Disconnected")
