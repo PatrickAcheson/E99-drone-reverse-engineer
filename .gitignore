@@ -6,3 +6,6 @@ research/*
 results/*
 tests/*
 docs/*
+!docs/images/
+docs/images/*
+!docs/images/flight-console.png

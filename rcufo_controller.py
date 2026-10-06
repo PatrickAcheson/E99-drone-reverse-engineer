@@ -19,6 +19,9 @@ from rcufo.control import FlightLink, axes_for_keys
 from rcufo.video import DemoLink, SessionLog, VideoFeed
 
 
+DEFAULT_TRIMS = {"roll": 0, "pitch": 24, "yaw": 0}
+
+
 def validate_host(value):
     address = ipaddress.IPv4Address(value)
     if not address.is_private or address.is_unspecified or address.is_multicast:
@@ -33,7 +36,7 @@ class Controller:
         self.link, self.video = None, None
         self.last_input_sequence = -1
         self.fps_time, self.fps_count, self.fps = time.monotonic(), 0, 0.0
-        self.trims = {"roll": 0, "pitch": 0, "yaw": 0}
+        self.trims = dict(DEFAULT_TRIMS)
         self.last_keys, self.last_speed, self.headless = set(), 30, False
 
     def update_sticks(self):
@@ -55,7 +58,7 @@ class Controller:
             self.fps_time, self.fps_count, self.fps = time.monotonic(), 0, 0.0
             self.link.start()
             self.video.start()
-            self.log.emit("connected", host=host, demo=self.demo)
+            self.log.emit("connected", host=host, demo=self.demo, trims=dict(self.trims))
             return "Connecting; flight controls remain disabled"
 
     def disconnect(self):
@@ -113,7 +116,7 @@ class Controller:
             if self.link and self.link.status()["calibrating"]:
                 return "Wait for the calibration command to finish before changing trim"
             if axis == "reset":
-                self.trims = {"roll": 0, "pitch": 0, "yaw": 0}
+                self.trims = dict(DEFAULT_TRIMS)
             elif axis in self.trims and isinstance(delta, int) and delta in (-2, 2):
                 self.trims[axis] = max(-48, min(48, self.trims[axis] + delta))
             else:

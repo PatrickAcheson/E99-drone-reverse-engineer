@@ -4,6 +4,8 @@ For the drone that returned profile 83 in your probe. This client uses the
 observed TC nine-byte UDP control protocol and RTSP video over UDP. It does
 not support the extended GL flight format.
 
+![RC UFO flight console displaying the live camera feed and pitch trim set to +24](docs/images/flight-console.png)
+
 Connect the PC to the drone's Wi-Fi, close the official app and other video
 clients, then run from this project folder:
 
@@ -49,15 +51,17 @@ take-off, return, flip, or landing sequences.
 If the drone drifts backward with no keys held, use **Pitch trim -> Forward +**
 in small steps. Each click adds 2 to the resting pitch value; for example,
 trim +4 sends pitch 132 with no movement input. Roll and yaw have equivalent
-trim controls. **Reset trim** returns all three offsets to zero. Trim starts
-at zero each time the Python controller is launched and remains set during
-that session. No correction is applied automatically from the video.
+trim controls. The startup preset is **pitch +24, roll 0, yaw 0**, based on
+your hover test. This sends resting pitch 152 instead of the untrimmed 128.
+**Reset trim** restores that preset. Adjustments remain set during the session;
+each new launch starts with the preset. No correction is estimated from video.
 
 Calibration and trim serve different purposes. Place the drone stationary
-on a level surface, reset trim, and let the **two-second calibration command**
+on a level surface and let the **two-second calibration command**
 finish before taking off. The client shows a countdown and prevents take-off
 from interrupting it. During calibration it transmits untrimmed neutral
-sticks. This confirms the command duration, not successful firmware calibration.
+sticks, then resumes the selected trim. This confirms the command duration,
+not successful firmware calibration.
 Emergency stop and landing remain available during the countdown.
 
 After calibration, use trim only for small remaining drift. A large required
