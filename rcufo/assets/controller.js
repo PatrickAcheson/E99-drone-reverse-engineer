@@ -35,6 +35,7 @@ async function input(force = false) {
   sequence = Math.max(sequence + 1, Date.now());
   const data = {
     sequence, keys: Array.from(keys), speed: Number($('speed').value),
+    yaw_speed: Number($('yaw-speed').value),
     headless: $('headless').checked,
   };
   try { await post('/api/input', data); }
@@ -188,7 +189,8 @@ $('quit').onclick = async () => {
   } catch (error) { message(error.message); }
 };
 $('speed').oninput = () => { $('speed-value').textContent = $('speed').value; };
-$('rotate').onchange = fitStream;
+$('yaw-speed').oninput = () => { $('yaw-speed-value').textContent = $('yaw-speed').value; };
+$('rotate').onchange = () => { fitStream(); $('rotate').blur(); };
 $('stream').onload = fitStream;
 $('focus-view').onclick = () => {
   const active = document.body.classList.toggle('focus-view');
@@ -212,7 +214,11 @@ document.addEventListener('keydown', event => {
     if (!event.repeat) action('emergency');
     return;
   }
-  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target.tagName)) return;
+  const target = event.target;
+  const editingText = target.isContentEditable || target.tagName === 'TEXTAREA'
+    || (target.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(target.type));
+  if (editingText || target.tagName === 'SELECT') return;
+  if (key === 'space' && ['checkbox', 'radio'].includes(target.type)) return;
   if (movementKeys.includes(key)) {
     event.preventDefault();
     if (state.enabled) keys.add(key);

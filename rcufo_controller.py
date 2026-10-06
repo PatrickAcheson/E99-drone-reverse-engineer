@@ -38,10 +38,11 @@ class Controller:
         self.fps_time, self.fps_count, self.fps = time.monotonic(), 0, 0.0
         self.trims = dict(DEFAULT_TRIMS)
         self.last_keys, self.last_speed, self.headless = set(), 30, False
+        self.last_yaw_speed = 64
 
     def update_sticks(self):
         if self.link:
-            self.link.update_input(axes_for_keys(self.last_keys, self.last_speed, self.trims), self.headless)
+            self.link.update_input(axes_for_keys(self.last_keys, self.last_speed, self.trims, self.last_yaw_speed), self.headless)
 
     def connect(self, host):
         with self.lock:
@@ -58,7 +59,7 @@ class Controller:
             self.fps_time, self.fps_count, self.fps = time.monotonic(), 0, 0.0
             self.link.start()
             self.video.start()
-            self.log.emit("connected", host=host, demo=self.demo, trims=dict(self.trims))
+            self.log.emit("connected", host=host, demo=self.demo, trims=dict(self.trims), yaw_speed=self.last_yaw_speed)
             return "Connecting; flight controls remain disabled"
 
     def disconnect(self):
@@ -78,6 +79,7 @@ class Controller:
                      "enabled": False, "profile": None, "fresh": False, "emergency": False,
                      "reason": "Disconnected", "axes": [128] * 4, "video": "Video waiting",
                      "trims": dict(self.trims), "calibrating": False, "calibration_remaining": 0,
+                     "yaw_speed": self.last_yaw_speed,
                      "video_stale": False, "dimensions": None, "fps": 0, "log_directory": str(self.log.directory)}
             if self.link:
                 state.update(self.link.status())
@@ -100,11 +102,15 @@ class Controller:
         speed = values.get("speed", 30)
         if not isinstance(speed, (int, float)) or not math.isfinite(speed):
             raise ValueError("Invalid stick speed")
+        yaw_speed = values.get("yaw_speed", 64)
+        if not isinstance(yaw_speed, (int, float)) or not math.isfinite(yaw_speed):
+            raise ValueError("Invalid yaw strength")
         with self.lock:
             if sequence <= self.last_input_sequence:
                 return "Old input ignored"
             self.last_input_sequence = sequence
             self.last_keys, self.last_speed = set(keys), speed
+            self.last_yaw_speed = max(1, min(127, int(yaw_speed)))
             self.headless = values.get("headless") is True
             self.update_sticks()
         return "Input updated"

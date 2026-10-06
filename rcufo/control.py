@@ -17,18 +17,20 @@ def control_packet(roll=128, pitch=128, throttle=128, yaw=128, flags=0):
     return bytes((3, 0x66, *values, checksum, 0x99))
 
 
-def axes_for_keys(keys, speed, trims=None):
+def axes_for_keys(keys, speed, trims=None, yaw_speed=64):
     speed = max(1, min(64, int(speed)))
+    yaw_speed = max(1, min(127, int(yaw_speed)))
     trims = trims or {}
     for name in ("roll", "pitch", "yaw"):
         value = trims.get(name, 0)
         if not isinstance(value, int) or not -48 <= value <= 48:
             raise ValueError("Trim values must be integers in range -48..48")
-    def axis(positive, negative, trim=0):
-        value = 128 + trim + speed * (int(positive in keys) - int(negative in keys))
+    def axis(positive, negative, trim=0, strength=None):
+        strength = speed if strength is None else strength
+        value = 128 + trim + strength * (int(positive in keys) - int(negative in keys))
         return max(1, min(255, value))
     return (axis("d", "a", trims.get("roll", 0)), axis("w", "s", trims.get("pitch", 0)),
-            axis("space", "shift"), axis("e", "q", trims.get("yaw", 0)))
+            axis("space", "shift"), axis("e", "q", trims.get("yaw", 0), yaw_speed))
 
 
 class FlightLink:
